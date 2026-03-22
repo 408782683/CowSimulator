@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CowSimulator</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; }
+    .title { font-size: 3rem; font-weight: 900; letter-spacing: 0.1em; color: #f0c040; text-shadow: 0 0 30px #f0c04088; margin-bottom: 0.5rem; }
+    .subtitle { color: #aaa; font-size: 1rem; margin-bottom: 3rem; letter-spacing: 0.3em; text-transform: uppercase; }
+    .menu { display: flex; gap: 2rem; }
+    .menu-btn {
+      padding: 1.2rem 2.5rem; font-size: 1.1rem; font-weight: 700;
+      border: 2px solid #f0c040; background: transparent; color: #f0c040;
+      cursor: pointer; border-radius: 8px; transition: all 0.2s; letter-spacing: 0.05em;
+      text-decoration: none; display: flex; align-items: center; gap: 0.6rem;
+    }
+    .menu-btn:hover { background: #f0c040; color: #1a1a2e; transform: translateY(-3px); box-shadow: 0 8px 24px #f0c04044; }
+    .menu-btn .icon { font-size: 1.4rem; }
+    .cow-deco { font-size: 5rem; margin-bottom: 1rem; animation: float 3s ease-in-out infinite; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+  </style>
+</head>
+<body>
+  <div class="cow-deco">🐄</div>
+  <div class="title">CowSimulator</div>
+  <div class="subtitle">作者：5higure</div>
+  <div class="menu">
+    <a href="Editor.html" class="menu-btn"><span class="icon">✏️</span> 关卡编辑器</a>
+    <a href="Simulator.html" class="menu-btn"><span class="icon">🎮</span> 关卡模拟</a>
+  </div>
+</body>
+</html>
