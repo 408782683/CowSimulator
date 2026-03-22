@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>CowSimulator - 关卡编辑器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app-layout">
+
+  <!-- 左侧工具栏 -->
+  <div class="sidebar">
+    <a href="index.html" class="sidebar-title" style="text-decoration:none">🐄 CowSimulator</a>
+
+    <a href="index.html" class="tool-btn" style="text-decoration:none">
+      <span class="icon">◀</span> 返回主页
+    </a>
+
+    <hr class="sidebar-sep">
+
+    <button class="tool-btn" id="btn-new" title="新建关卡">
+      <span class="icon">📐</span> 新建关卡
+    </button>
+
+    <hr class="sidebar-sep">
+
+    <button class="tool-btn" id="btn-paint" title="为小格赋色">
+      <span class="icon">🎨</span> 小格赋色
+    </button>
+
+    <button class="tool-btn" id="btn-marker" title="设置标定方块">
+      <span class="icon">🐄</span> 设定标定方块
+    </button>
+
+    <hr class="sidebar-sep">
+
+    <button class="tool-btn" id="btn-save" title="保存关卡为.cow文件">
+      <span class="icon">💾</span> 保存关卡
+    </button>
+
+    <button class="tool-btn" id="btn-load" title="读取.cow文件">
+      <span class="icon">📂</span> 读取关卡
+    </button>
+    <!-- 隐藏的文件选择输入框 -->
+    <input type="file" id="file-input" accept=".cow" style="display:none">
+
+    <hr class="sidebar-sep">
+
+    <button class="tool-btn" id="btn-clear" title="清空所有颜色">
+      <span class="icon">🗑️</span> 清空颜色
+    </button>
+    <button class="tool-btn" id="btn-clear-markers" title="清空所有标定方块">
+      <span class="icon">❌</span> 清空标定
+    </button>
+
+    <hr class="sidebar-sep">
+
+    <button class="tool-btn" id="btn-autosolve" title="自动解密并显示标定方块位置">
+      <span class="icon">🤖</span> 自动解密
+    </button>
+  </div>
+
+  <!-- 主内容区 -->
+  <div class="main-area">
+    <div class="top-bar">
+      <span style="font-weight:700;color:var(--accent)">关卡编辑器</span>
+      <span class="info-chip" id="chip-mode">模式：浏览</span>
+      <span class="info-chip" id="chip-size">尺寸：—</span>
+      <span class="info-chip" id="chip-colors">颜色数：0</span>
+      <span class="info-chip" id="chip-markers">标定方块：0</span>
+      <span id="status-area"></span>
+    </div>
+    <div class="canvas-area" id="canvas-area">
+      <div style="color:var(--muted);text-align:center">
+        <div style="font-size:3rem;margin-bottom:1rem">📐</div>
+        <div>点击左侧「新建关卡」开始编辑</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 可拖动颜色选择面板 -->
+<div class="color-picker-panel" id="color-picker" style="display:none; left:220px; top:80px;">
+  <div class="cp-title">选择颜色</div>
+  <div class="color-swatches" id="swatches"></div>
+</div>
+
+<!-- 新建关卡弹窗 -->
+<div class="modal-overlay" id="modal-new" style="display:none">
+  <div class="modal">
+    <h3>📐 新建关卡</h3>
+    <label>矩阵大小 (N×N)：</label>
+    <input type="number" id="inp-size" min="2" max="20" value="8">
+    <div class="modal-btns">
+      <button class="btn btn-secondary" id="modal-cancel">取消</button>
+      <button class="btn btn-primary" id="modal-confirm">创建</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────
+//  状态设置
+// ──────────────────────────────────────────
+const COLORS = [
+  null,          // 0 = 空白
+  '#c2658b',     // 1
+  '#acd994',     // 2
+  '#ab6d45',     // 3
+  '#68bce6',     // 4
+  '#ffa0ec',     // 5
+  '#e2ba45',     // 6
+  '#6082b5',     // 7
+  '#9178d0',     // 8
+  '#47b3b0',     // 9
+  '#ffa96c',     // 10
+  '#a7bed9',     // 11
+  '#ff5722',     // 12
+  '#e6a8c0',     // 13
+  '#9c27b0',     // 14
+  '#ffeb3b',     // 15
+];
+
+// 编辑器全局状态
+let state = {
+  n: 0,
+  grid: [],         // n×n 颜色索引矩阵（0=空白）
+  markers: [],      // 标定方块位置集合，元素格式为 "行,列"
+  tool: 'none',     // 当前工具：'paint'（赋色）| 'marker'（标定）| 'none'（浏览）
+  paintColor: 1,    // 当前选中的绘制颜色索引
+  painting: false,  // 是否正在拖动绘制
+  paintMode: null,  // 绘制模式：'set'（赋色）| 'clear'（清除）
+};
+
+// ──────────────────────────────────────────
+//  初始化网格
+// ──────────────────────────────────────────
+function initGrid(n) {
+  state.n = n;
+  // 创建 n×n 全零矩阵（全为空白格）
+  state.grid = Array.from({ length: n }, () => new Array(n).fill(0));
+  state.markers = new Set();
+  renderGrid();
+  updateChips();
+}
+
+// ──────────────────────────────────────────
+//  渲染网格
+// ──────────────────────────────────────────
+function renderGrid() {
+  const area = document.getElementById('canvas-area');
+  // 根据矩阵大小自动计算格子尺寸，保持在 28~56px 之间
+  const size = Math.max(28, Math.min(56, Math.floor(560 / state.n)));
+  const table = document.createElement('table');
+  table.className = 'grid-table';
+  table.style.setProperty('--cell-size', size + 'px');
+
+  for (let r = 0; r < state.n; r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < state.n; c++) {
+      const td = document.createElement('td');
+      td.dataset.r = r;
+      td.dataset.c = c;
+      applyCell(td, r, c);
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+
+  // 绑定鼠标事件：mousedown 开始绘制，mouseover 拖动绘制，mouseup 结束绘制
+  table.addEventListener('mousedown', onMouseDown);
+  table.addEventListener('mouseover', onMouseOver);
+  document.addEventListener('mouseup', () => { state.painting = false; state.paintMode = null; });
+
+  area.innerHTML = '';
+  area.appendChild(table);
+}
+
+// 根据状态更新单个格子的视觉表现
+function applyCell(td, r, c) {
+  const ci = state.grid[r][c];
+  td.style.background = COLORS[ci] || '#1e1e3a';
+  td.innerHTML = '';
+  // 若该格有标定方块，覆盖牛图标
+  if (state.markers.has(`${r},${c}`)) {
+    const span = document.createElement('span');
+    span.className = 'cell-mark';
+    span.textContent = '🐄';
+    td.appendChild(span);
+  }
+}
+
+// 刷新指定单元格的视觉显示
+function refreshCell(r, c) {
+  const td = document.querySelector(`td[data-r="${r}"][data-c="${c}"]`);
+  if (td) applyCell(td, r, c);
+}
+
+// ──────────────────────────────────────────
+//  鼠标事件处理
+// ──────────────────────────────────────────
+
+// 从事件目标获取格子坐标
+function getCell(e) {
+  const td = e.target.closest('td');
+  if (!td) return null;
+  return { r: +td.dataset.r, c: +td.dataset.c };
+}
+
+// 鼠标按下：开始绘制或放置标定方块
+function onMouseDown(e) {
+  if (state.tool === 'none') return;
+  e.preventDefault();
+  const pos = getCell(e);
+  if (!pos) return;
+
+  if (state.tool === 'paint') {
+    // 判断绘制模式：点击已有相同颜色格则清除，否则赋色
+    const cur = state.grid[pos.r][pos.c];
+    state.paintMode = (cur === state.paintColor) ? 'clear' : 'set';
+    state.painting = true;
+    applyPaint(pos.r, pos.c);
+  } else if (state.tool === 'marker') {
+    toggleMarker(pos.r, pos.c);
+  }
+}
+
+// 鼠标滑过：拖动绘制（仅赋色模式下有效）
+function onMouseOver(e) {
+  if (!state.painting || state.tool !== 'paint') return;
+  const pos = getCell(e);
+  if (!pos) return;
+  applyPaint(pos.r, pos.c);
+}
+
+// 执行绘制操作
+function applyPaint(r, c) {
+  if (state.paintMode === 'set') {
+    state.grid[r][c] = state.paintColor;
+  } else {
+    state.grid[r][c] = 0;
+    // 清除颜色时同时移除该格的标定方块
+    state.markers.delete(`${r},${c}`);
+  }
+  refreshCell(r, c);
+  updateChips();
+}
+
+// ──────────────────────────────────────────
+//  标定方块逻辑
+// ──────────────────────────────────────────
+
+// 切换指定格的标定方块状态（已有则移除，未有则添加并校验合法性）
+function toggleMarker(r, c) {
+  const key = `${r},${c}`;
+  if (state.markers.has(key)) {
+    // 已有标定方块，点击取消
+    state.markers.delete(key);
+    refreshCell(r, c);
+    updateChips();
+    return;
+  }
+  // 放置前进行合法性校验
+  const err = validateMarkerPlacement(r, c);
+  if (err) { showStatus(err, 'err'); return; }
+  state.markers.add(key);
+  refreshCell(r, c);
+  updateChips();
+  showStatus('标定方块已放置', 'ok');
+}
+
+// 校验在 (r,c) 放置标定方块是否合法
+// 返回 null 表示合法，返回字符串则为错误信息
+function validateMarkerPlacement(r, c) {
+  // 规则一：该格必须有颜色
+  if (state.grid[r][c] === 0) return '该格没有颜色，无法设置标定方块';
+
+  const ci = state.grid[r][c];
+
+  // 规则二：每种颜色只能有一个标定方块
+  for (const key of state.markers) {
+    const [mr, mc] = key.split(',').map(Number);
+    if (state.grid[mr][mc] === ci) return `该颜色已有标定方块 (颜色 ${ci})`;
+  }
+
+  // 规则三：每行每列只能有一个标定方块
+  for (const key of state.markers) {
+    const [mr, mc] = key.split(',').map(Number);
+    if (mr === r) return `第 ${r+1} 行已有标定方块`;
+    if (mc === c) return `第 ${c+1} 列已有标定方块`;
+  }
+
+  // 规则四：不能与已有标定方块 8-邻接（含斜角）
+  for (const key of state.markers) {
+    const [mr, mc] = key.split(',').map(Number);
+    if (Math.abs(mr - r) <= 1 && Math.abs(mc - c) <= 1) return '与已有标定方块相邻（含斜角）';
+  }
+
+  return null;
+}
+
+// ──────────────────────────────────────────
+//  顶部信息栏与状态提示
+// ──────────────────────────────────────────
+
+// 更新顶部各状态徽章
+function updateChips() {
+  document.getElementById('chip-size').textContent = state.n ? `尺寸：${state.n}×${state.n}` : '尺寸：—';
+  // 统计已使用颜色种数
+  const usedColors = new Set();
+  for (let r = 0; r < state.n; r++)
+    for (let c = 0; c < state.n; c++)
+      if (state.grid[r][c] !== 0) usedColors.add(state.grid[r][c]);
+  document.getElementById('chip-colors').textContent = `颜色数：${usedColors.size}`;
+  document.getElementById('chip-markers').textContent = `标定方块：${state.markers.size}`;
+}
+
+// 显示临时状态消息（3秒后自动消失）
+function showStatus(msg, type = 'info') {
+  const el = document.getElementById('status-area');
+  el.innerHTML = `<span class="status-msg ${type}">${msg}</span>`;
+  setTimeout(() => el.innerHTML = '', 3000);
+}
+
+// 切换当前工具模式，更新按钮高亮和颜色面板可见性
+function setMode(mode) {
+  state.tool = mode;
+  document.getElementById('chip-mode').textContent =
+    mode === 'paint'  ? '模式：赋色' :
+    mode === 'marker' ? '模式：标定方块' : '模式：浏览';
+  ['btn-paint','btn-marker'].forEach(id => {
+    document.getElementById(id).classList.remove('active');
+  });
+  if (mode === 'paint') {
+    document.getElementById('btn-paint').classList.add('active');
+    document.getElementById('color-picker').style.display = '';
+  } else if (mode === 'marker') {
+    document.getElementById('btn-marker').classList.add('active');
+    document.getElementById('color-picker').style.display = 'none';
+  } else {
+    document.getElementById('color-picker').style.display = 'none';
+  }
+}
+
+// ──────────────────────────────────────────
+//  颜色选择面板渲染
+// ──────────────────────────────────────────
+function buildSwatches() {
+  const cont = document.getElementById('swatches');
+  cont.innerHTML = '';
+  COLORS.forEach((col, i) => {
+    const div = document.createElement('div');
+    if (i === 0) {
+      // 索引0为"清除颜色"按钮（虚线边框样式）
+      div.className = 'color-swatch empty' + (state.paintColor === 0 ? ' selected' : '');
+      div.title = '清除颜色';
+      div.addEventListener('click', () => selectColor(0));
+    } else {
+      div.className = 'color-swatch' + (state.paintColor === i ? ' selected' : '');
+      div.style.background = col;
+      div.title = `颜色 ${i}`;
+      div.addEventListener('click', () => selectColor(i));
+    }
+    cont.appendChild(div);
+  });
+}
+
+// 选中颜色并刷新面板高亮
+function selectColor(i) {
+  state.paintColor = i;
+  buildSwatches();
+}
+
+// ──────────────────────────────────────────
+//  颜色面板拖动实现（IIFE 防止变量污染全局）
+// ──────────────────────────────────────────
+(function() {
+  const panel = document.getElementById('color-picker');
+  let dragging = false, ox = 0, oy = 0;
+  // 按下面板非色块区域时开始拖动
+  panel.addEventListener('mousedown', e => {
+    if (e.target.classList.contains('color-swatch')) return;
+    dragging = true;
+    ox = e.clientX - panel.offsetLeft;
+    oy = e.clientY - panel.offsetTop;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    panel.style.left = (e.clientX - ox) + 'px';
+    panel.style.top  = (e.clientY - oy) + 'px';
+  });
+  document.addEventListener('mouseup', () => dragging = false);
+})();
+
+// ──────────────────────────────────────────
+//  关卡保存与读取
+// ──────────────────────────────────────────
+
+// 构建关卡数据对象（用于序列化为 JSON）
+function buildCowData() {
+  return {
+    version: 1,
+    n: state.n,
+    grid: state.grid,
+    markers: [...state.markers],
+    solution: null, // 自动解密结果，保存时由 autoSolve 填充
+  };
+}
+
+// 保存关卡为 .cow 文件，自动解密结果一并写入
+function saveCow() {
+  if (!state.n) { showStatus('请先新建关卡', 'err'); return; }
+  const data = buildCowData();
+  // 调用自动解密，将唯一解写入 solution 字段
+  const solution = autoSolve(state.n, state.grid, state.markers);
+  data.solution = solution; // 无解时为 null
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `level_${state.n}x${state.n}.cow`;
+  a.click();
+  if (solution) {
+    showStatus(`关卡已保存（含自动解，共 ${solution.length} 个标定方块）`, 'ok');
+  } else {
+    showStatus('关卡已保存（无自动解或颜色未设置）', 'info');
+  }
+}
+
+// 从 .cow 文件读取关卡，恢复编辑器全部状态
+function loadCow(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.n || !data.grid) throw new Error('格式错误');
+      state.n = data.n;
+      state.grid = data.grid;
+      state.markers = new Set(data.markers || []);
+      renderGrid();
+      updateChips();
+      showStatus(`关卡已读取 (${data.n}×${data.n})`, 'ok');
+    } catch(err) {
+      showStatus('读取失败：' + err.message, 'err');
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  自动解密模块  —  约束传播 + 回溯搜索（AC-3 风格）
+// ══════════════════════════════════════════════════════════════
+//
+//  游戏规则约束：
+//   1. 每种颜色恰好有 1 个标定方块
+//   2. 每行、每列恰好有 1 个标定方块
+//   3. 任意两个标定方块不能 8-邻接（含斜角）
+//
+//  算法分三层：
+//   第一层  候选域初始化  —  对每种颜色收集所有候选格
+//   第二层  约束传播      —  反复消除不可能的候选格直到稳定
+//   第三层  回溯搜索      —  传播无法继续时枚举最小候选域（MRV启发）
+// ══════════════════════════════════════════════════════════════
+
+function autoSolve(n, grid, markers) {
+  // 第零步：收集所有已使用颜色（忽略空白格 0）
+  const colorSet = new Set();
+  for (let r = 0; r < n; r++)
+    for (let c = 0; c < n; c++)
+      if (grid[r][c] !== 0) colorSet.add(grid[r][c]);
+  const colors = [...colorSet];
+  const numColors = colors.length;
+
+  if (numColors === 0) return null;
+
+  // 第一步：初始化候选域
+  // candidates[颜色索引] = Set，包含该颜色所有格子的 "行,列" 字符串
+  const candidates = colors.map(ci => {
+    const s = new Set();
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (grid[r][c] === ci) s.add(`${r},${c}`);
+    return s;
+  });
+
+  // 辅助：将 "行,列" 字符串解析为 [行, 列] 数字数组
+  const parse = key => key.split(',').map(Number);
+
+  // 第二步：约束传播
+  // 返回 false 表示矛盾（当前分支无解），true 表示传播完成
+  function propagate(cands) {
+    let changed = true;
+    while (changed) {
+      changed = false;
+
+      // 传播规则 A（单候选确定）：
+      // 若某颜色只剩 1 个候选格，则该格确定放置
+      // 将该格所在行、列及 8-邻域从其他所有颜色的候选中删除
+      for (let ci = 0; ci < numColors; ci++) {
+        if (cands[ci].size === 0) return false; // 某颜色无候选，矛盾
+        if (cands[ci].size === 1) {
+          const [r, c] = parse([...cands[ci]][0]);
+          for (let oi = 0; oi < numColors; oi++) {
+            if (oi === ci) continue;
+            const before = cands[oi].size;
+            for (const k of [...cands[oi]]) {
+              const [kr, kc] = parse(k);
+              // 删除条件：同行、同列或 8-邻接
+              if (kr === r || kc === c ||
+                  (Math.abs(kr - r) <= 1 && Math.abs(kc - c) <= 1)) {
+                cands[oi].delete(k);
+              }
+            }
+            if (cands[oi].size < before) changed = true;
+            if (cands[oi].size === 0) return false; // 删除后无候选，矛盾
+          }
+        }
+      }
+
+      // 传播规则 B（行独占性）：
+      // 若某行只有唯一颜色在该行有候选格，则该颜色必须放在此行
+      // 删除该颜色在其他行的所有候选格
+      for (let row = 0; row < n; row++) {
+        const inRow = [];
+        for (let ci = 0; ci < numColors; ci++) {
+          if ([...cands[ci]].some(k => parse(k)[0] === row)) inRow.push(ci);
+        }
+        if (inRow.length === 1) {
+          const ci = inRow[0];
+          if (cands[ci].size > 1) {
+            const before = cands[ci].size;
+            for (const k of [...cands[ci]]) {
+              if (parse(k)[0] !== row) cands[ci].delete(k);
+            }
+            if (cands[ci].size < before) changed = true;
+            if (cands[ci].size === 0) return false;
+          }
+        }
+      }
+
+      // 传播规则 C（列独占性）：
+      // 若某列只有唯一颜色在该列有候选格，则该颜色必须放在此列
+      // 删除该颜色在其他列的所有候选格
+      for (let col = 0; col < n; col++) {
+        const inCol = [];
+        for (let ci = 0; ci < numColors; ci++) {
+          if ([...cands[ci]].some(k => parse(k)[1] === col)) inCol.push(ci);
+        }
+        if (inCol.length === 1) {
+          const ci = inCol[0];
+          if (cands[ci].size > 1) {
+            const before = cands[ci].size;
+            for (const k of [...cands[ci]]) {
+              if (parse(k)[1] !== col) cands[ci].delete(k);
+            }
+            if (cands[ci].size < before) changed = true;
+            if (cands[ci].size === 0) return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  // 判断候选域是否已完全确定（每种颜色恰好剩 1 个候选）
+  function isComplete(cands) {
+    return cands.every(s => s.size === 1);
+  }
+
+  // 最终答案合法性二次验证（防止极端情况下约束传播遗漏冲突）
+  function validateSolution(placed) {
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const [r1, c1] = placed[i], [r2, c2] = placed[j];
+        if (r1 === r2) return false;           // 同行冲突
+        if (c1 === c2) return false;           // 同列冲突
+        if (Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1) return false; // 8-邻接冲突
+      }
+    }
+    return true;
+  }
+
+  // 深拷贝候选域（用于回溯时保存当前分支快照）
+  function cloneCands(cands) {
+    return cands.map(s => new Set(s));
+  }
+
+  // 第三步：深度优先回溯搜索（MRV 启发式）
+  function backtrack(cands) {
+    // 先做约束传播，矛盾则回溯
+    if (!propagate(cands)) return null;
+
+    // 所有颜色已确定，验证解合法性后返回
+    if (isComplete(cands)) {
+      const placed = cands.map(s => parse([...s][0]));
+      if (!validateSolution(placed)) return null;
+      return placed;
+    }
+
+    // MRV 启发：选择候选数最少（且大于1）的颜色优先枚举
+    // 最小剩余值策略能最快暴露矛盾，大幅减少回溯次数
+    let best = -1, bestSize = Infinity;
+    for (let ci = 0; ci < numColors; ci++) {
+      if (cands[ci].size > 1 && cands[ci].size < bestSize) {
+        bestSize = cands[ci].size;
+        best = ci;
+      }
+    }
+    if (best === -1) return null;
+
+    // 按行列顺序枚举候选格（保证结果确定性）
+    const sorted = [...cands[best]].sort((a, b) => {
+      const [ar, ac] = parse(a), [br, bc] = parse(b);
+      return ar !== br ? ar - br : ac - bc;
+    });
+
+    // 对每个候选位置创建独立分支并递归搜索
+    for (const k of sorted) {
+      const branch = cloneCands(cands);
+      branch[best] = new Set([k]); // 固定该颜色放置在此格
+      const result = backtrack(branch);
+      if (result) return result;   // 找到解立即返回，不继续搜索
+    }
+
+    return null; // 所有分支均矛盾，向上回溯
+  }
+
+  // 启动求解
+  const initCands = cloneCands(candidates);
+  const result = backtrack(initCands);
+
+  if (!result) return null;
+
+  // 将结果转为与 markers 格式一致的字符串数组，如 ["0,3", "2,1", ...]
+  return result.map(([r, c]) => `${r},${c}`);
+}
+
+// ──────────────────────────────────────────
+//  按钮事件绑定
+// ──────────────────────────────────────────
+
+// 新建关卡：弹出尺寸输入弹窗
+document.getElementById('btn-new').addEventListener('click', () => {
+  document.getElementById('modal-new').style.display = '';
+});
+
+// 取消新建
+document.getElementById('modal-cancel').addEventListener('click', () => {
+  document.getElementById('modal-new').style.display = 'none';
+});
+
+// 确认新建：验证输入范围后初始化网格
+document.getElementById('modal-confirm').addEventListener('click', () => {
+  const n = parseInt(document.getElementById('inp-size').value);
+  if (n < 2 || n > 20 || isNaN(n)) { showStatus('矩阵大小需在 2~20 之间', 'err'); return; }
+  document.getElementById('modal-new').style.display = 'none';
+  initGrid(n);
+  setMode('none');
+  showStatus(`已创建 ${n}×${n} 关卡`, 'ok');
+});
+
+// 小格赋色：切换赋色模式（再次点击退出）
+document.getElementById('btn-paint').addEventListener('click', () => {
+  if (!state.n) { showStatus('请先新建关卡', 'err'); return; }
+  setMode(state.tool === 'paint' ? 'none' : 'paint');
+});
+
+// 设定标定方块：切换标定模式（再次点击退出）
+document.getElementById('btn-marker').addEventListener('click', () => {
+  if (!state.n) { showStatus('请先新建关卡', 'err'); return; }
+  setMode(state.tool === 'marker' ? 'none' : 'marker');
+});
+
+// 保存关卡
+document.getElementById('btn-save').addEventListener('click', saveCow);
+
+// 读取关卡：触发隐藏文件选择框
+document.getElementById('btn-load').addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) loadCow(e.target.files[0]);
+  e.target.value = ''; // 重置输入框，允许重复选择同一文件
+});
+
+// 清空所有颜色（同时清除标定方块）
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!state.n) return;
+  if (confirm('确定清空所有颜色？')) {
+    for (let r = 0; r < state.n; r++)
+      for (let c = 0; c < state.n; c++)
+        state.grid[r][c] = 0;
+    state.markers.clear();
+    renderGrid();
+    updateChips();
+    showStatus('已清空颜色', 'ok');
+  }
+});
+
+// 仅清空标定方块，保留颜色不变
+document.getElementById('btn-clear-markers').addEventListener('click', () => {
+  if (!state.n) return;
+  state.markers.clear();
+  renderGrid();
+  updateChips();
+  showStatus('已清空标定方块', 'ok');
+});
+
+// 自动解密：运行求解并将结果显示在编辑器中
+document.getElementById('btn-autosolve').addEventListener('click', () => {
+  if (!state.n) { showStatus('请先新建关卡', 'err'); return; }
+
+  // 检查是否已有颜色设置
+  const usedColors = new Set();
+  for (let r = 0; r < state.n; r++)
+    for (let c = 0; c < state.n; c++)
+      if (state.grid[r][c] !== 0) usedColors.add(state.grid[r][c]);
+  if (usedColors.size === 0) { showStatus('请先为小格赋色', 'err'); return; }
+
+  showStatus('正在求解…', 'info');
+  // 用 setTimeout 确保"正在求解"提示先渲染到页面，再执行计算
+  setTimeout(() => {
+    const solution = autoSolve(state.n, state.grid, state.markers);
+    if (!solution) {
+      showStatus('未找到解（请检查关卡颜色设置是否合法）', 'err');
+      return;
+    }
+    // 将求解结果写入编辑器标定方块状态并刷新显示
+    state.markers = new Set(solution);
+    renderGrid();
+    updateChips();
+    showStatus(`求解成功！找到 ${solution.length} 个标定方块`, 'ok');
+  }, 30);
+});
+
+// 初始化颜色选择面板
+buildSwatches();
+</script>
+</body>
+</html>
