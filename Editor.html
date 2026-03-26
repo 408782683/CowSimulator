@@ -397,34 +397,49 @@ function selectColor(i) {
 //  关卡保存与读取
 // ──────────────────────────────────────────
 
-// 构建关卡数据对象（用于序列化为 JSON）
-function buildCowData() {
-  return {
+// 保存关卡为 .cow 文件
+// 逻辑说明：
+//   markers 字段 = 模拟器读取并与玩家答案比对的正确答案
+//   优先使用编辑器手动放置的标定方块；若为空则用自动解密结果填充
+//   solution 字段始终存放自动解密结果，供调试或扩展使用
+function saveCow() {
+  if (!state.n) { showStatus('请先新建关卡', 'err'); return; }
+
+  // 运行自动解密
+  const solution = autoSolve(state.n, state.grid, state.markers);
+
+  // 决定写入 markers 的最终答案
+  let finalMarkers;
+  if (state.markers.size > 0) {
+    // 编辑器已手动设置了标定方块，以手动结果为准
+    finalMarkers = [...state.markers];
+  } else if (solution) {
+    // 未手动设置，使用自动解密结果
+    finalMarkers = solution;
+  } else {
+    finalMarkers = [];
+  }
+
+  const data = {
     version: 1,
     n: state.n,
     grid: state.grid,
-    markers: [...state.markers],
-    solution: null, // 自动解密结果，保存时由 autoSolve 填充
+    markers: finalMarkers,  // 模拟器读取此字段作为正确答案
+    solution: solution,     // 自动解密结果备份（可为 null）
   };
-}
 
-// 保存关卡为 .cow 文件，自动解密结果一并写入
-function saveCow() {
-  if (!state.n) { showStatus('请先新建关卡', 'err'); return; }
-  const data = buildCowData();
-  // 调用自动解密，将唯一解写入 solution 字段
-  const solution = autoSolve(state.n, state.grid, state.markers);
-  data.solution = solution; // 无解时为 null
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `level_${state.n}x${state.n}.cow`;
   a.click();
-  if (solution) {
-    showStatus(`关卡已保存（含自动解，共 ${solution.length} 个标定方块）`, 'ok');
+
+  if (finalMarkers.length > 0) {
+    const src = state.markers.size > 0 ? '手动标定' : '自动解密';
+    showStatus(`关卡已保存（${src}，共 ${finalMarkers.length} 个标定方块）`, 'ok');
   } else {
-    showStatus('关卡已保存（无自动解或颜色未设置）', 'info');
+    showStatus('关卡已保存（未找到有效答案，请检查颜色设置）', 'info');
   }
 }
 
